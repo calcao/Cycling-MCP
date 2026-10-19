@@ -1,0 +1,36 @@
+services:
+  cycling-server:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      IGPSPORT_TOKEN: ${IGPSPORT_TOKEN:-}
+      IGPSPORT_USERNAME: ${IGPSPORT_USERNAME:-}
+      IGPSPORT_PASSWORD: ${IGPSPORT_PASSWORD:-}
+      CYCLING_DATA_DIR: /data
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-60}
+      SYNC_PAGES: ${SYNC_PAGES:-0}
+    volumes:
+      - ./data:/data
+    expose:
+      - "8000"
+    networks: [private]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [cycling-server]
+    networks: [private]
+networks:
+  private:
+volumes:
+  caddy_data:
+  caddy_config:

@@ -5,6 +5,7 @@ services:
     init: true
     environment:
       IGPSPORT_TOKEN: ${IGPSPORT_TOKEN:-}
+      IGPSPORT_WASM_PATH: /app/assets/edge_core_wasm_bg-GHC38n8Q.wasm
       IGPSPORT_USERNAME: ${IGPSPORT_USERNAME:-}
       IGPSPORT_PASSWORD: ${IGPSPORT_PASSWORD:-}
       CYCLING_DATA_DIR: /data
@@ -14,6 +15,7 @@ services:
       SYNC_PAGES: ${SYNC_PAGES:-0}
     volumes:
       - ./data:/data
+      - ./assets/edge_core_wasm_bg-GHC38n8Q.wasm:/app/assets/edge_core_wasm_bg-GHC38n8Q.wasm:ro
     expose:
       - "8000"
     networks: [private]

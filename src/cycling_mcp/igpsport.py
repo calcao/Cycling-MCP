@@ -1,65 +1,75 @@
 from __future__ import annotations
-import httpx
+
+import os
+from pathlib import Path
 from urllib.parse import urlparse
 
-BASE = "https://prod.zh.igpsport.com"
-TIMESTAMP = "/service/edge-core/api/public/timestamp"
+import httpx
+
+from .signing import SignedTransport, SigningError, TIME_PATH
+
 LIST = "/service/web-gateway/web-analyze/activity/queryMyActivity"
 DETAIL = "/service/web-gateway/web-analyze/activity/queryActivityDetail/"
 
-class IgpsportError(RuntimeError):
+
+class IgpsportError(SigningError):
     pass
 
+
 class IgpsportClient:
-    """Unofficial iGPSPORT CN API. Use an existing bearer token until signing is verified."""
-    def __init__(self, token="", username="", password=""):
-        self.token = token.strip().removeprefix("Bearer ").strip()
-        # Do not retain credentials: current login requires an unknown request signature.
-        self.http = httpx.Client(base_url=BASE, timeout=30, follow_redirects=False,
-            headers={"Accept": "application/json", "Origin": "https://app.igpsport.cn",
-                     "Referer": "https://app.igpsport.cn/", "timezone": "Asia/Shanghai",
-                     "qiwu-app-version": "8.07.08", "x-platform": "web"})
+    """Signed iGPSPORT CN client. Requires the pinned local WASM asset."""
+
+    def __init__(self, token="", username="", password="", wasm_path=None):
+        self.token = token.strip()
+        self.username = username
+        self.password = password
+        path = wasm_path or os.getenv("IGPSPORT_WASM_PATH", "assets/edge_core_wasm_bg-GHC38n8Q.wasm")
+        self.transport = SignedTransport(Path(path))
+        self._authenticated = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
-        self.http.close()
+        self.transport.close()
 
-    def server_timestamp(self):
-        """Read public server timestamp for diagnosing clock skew; no signing implied."""
-        r = self.http.get(TIMESTAMP)
-        r.raise_for_status()
-        return r.json()
+    def _authenticate(self):
+        if self._authenticated:
+            return
+        if self.token:
+            self.transport.use_token(self.token)
+        elif self.username and self.password:
+            self.transport.login(self.username, self.password)
+        else:
+            raise IgpsportError("Configure IGPSPORT_TOKEN or username/password locally")
+        self._authenticated = True
 
     def login(self):
-        raise IgpsportError(
-            "Automatic login is unavailable: current iGPSPORT Web requires "
-            "x-signature, x-nonce and x-timestamp. Supply IGPSPORT_TOKEN locally."
-        )
+        self._authenticate()
+
+    def server_timestamp(self):
+        return self.transport._exchange("GET", TIME_PATH)
 
     def get(self, path, params=None):
-        if not self.token:
-            self.login()
-        r = self.http.get(path, params=params,
-                          headers={"Authorization": "Bearer " + self.token})
-        if r.status_code in (401, 403):
-            raise IgpsportError("Bearer token expired or rejected; update IGPSPORT_TOKEN")
-        r.raise_for_status()
-        data = r.json()
-        if data.get("code") != 0:
-            raise IgpsportError("iGPSPORT API rejected request")
-        return data.get("data") or {}
+        self._authenticate()
+        return self.transport.get(path, params)
 
-    def activity_page(self, page):
-        if page < 1:
-            raise ValueError("page must be positive")
-        return self.get(LIST, {"pageNo": page, "pageSize": 20, "reqType": 0, "sort": 1})
+    def activity_page(self, page, page_size=20):
+        if type(page) is not int or page < 1 or type(page_size) is not int or page_size < 1:
+            raise ValueError("page and page_size must be positive integers")
+        data = self.get(LIST, {"pageNo": page, "pageSize": page_size,
+                               "reqType": 0, "sort": 1, "sortType": 1})
+        if not isinstance(data, dict):
+            raise IgpsportError("Invalid activity list response")
+        return data
 
     def activity_detail(self, ride_id):
         if not str(ride_id).isdecimal():
             raise ValueError("Invalid ride ID")
-        return self.get(DETAIL + str(ride_id))
+        data = self.get(DETAIL + str(ride_id))
+        if not isinstance(data, dict):
+            raise IgpsportError("Invalid activity detail response")
+        return data
 
     def download_fit(self, url):
         parsed = urlparse(url)
@@ -69,9 +79,9 @@ class IgpsportClient:
         if host != "igpsport.com" and not host.endswith(".igpsport.com"):
             raise IgpsportError("FIT host not allowlisted; inspect actual fitUrl before extending")
         with httpx.Client(timeout=60, follow_redirects=False, trust_env=False) as client:
-            r = client.get(url)
-            r.raise_for_status()
-            content = r.content
+            response = client.get(url)
+            response.raise_for_status()
+            content = response.content
         if len(content) < 14 or content[8:12] != b".FIT":
             raise IgpsportError("Downloaded data is not FIT")
         return content

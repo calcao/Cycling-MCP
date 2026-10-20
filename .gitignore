@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local reverse-engineering assets and personal cycling data
+assets/*.wasm
+data/
+*.fit
+activities-page*.json

@@ -3,21 +3,22 @@ import httpx
 from urllib.parse import urlparse
 
 BASE = "https://prod.zh.igpsport.com"
+TIMESTAMP = "/service/edge-core/api/public/timestamp"
 LIST = "/service/web-gateway/web-analyze/activity/queryMyActivity"
 DETAIL = "/service/web-gateway/web-analyze/activity/queryActivityDetail/"
-LOGIN = "/service/auth/account/login"
 
 class IgpsportError(RuntimeError):
     pass
 
 class IgpsportClient:
-    """Unofficial domestic iGPSPORT web endpoints, based on FitSync."""
+    """Unofficial iGPSPORT CN API. Use an existing bearer token until signing is verified."""
     def __init__(self, token="", username="", password=""):
-        self.token, self.username, self.password = token, username, password
+        self.token = token.strip().removeprefix("Bearer ").strip()
+        # Do not retain credentials: current login requires an unknown request signature.
         self.http = httpx.Client(base_url=BASE, timeout=30, follow_redirects=False,
-            headers={"Accept": "application/json", "Origin": "https://app.zh.igpsport.com",
-                     "Referer": "https://app.zh.igpsport.com/", "timezone": "Asia/Shanghai",
-                     "qiwu-app-version": "1.0.0"})
+            headers={"Accept": "application/json", "Origin": "https://app.igpsport.cn",
+                     "Referer": "https://app.igpsport.cn/", "timezone": "Asia/Shanghai",
+                     "qiwu-app-version": "8.07.08", "x-platform": "web"})
 
     def __enter__(self):
         return self
@@ -25,23 +26,25 @@ class IgpsportClient:
     def __exit__(self, *_):
         self.http.close()
 
-    def login(self):
-        if not self.username or not self.password:
-            raise IgpsportError("Missing or expired IGPSPORT_TOKEN; configure credentials locally")
-        r = self.http.post(LOGIN, json={"username": self.username, "password": self.password, "appId": "igpsport-web"})
+    def server_timestamp(self):
+        """Read public server timestamp for diagnosing clock skew; no signing implied."""
+        r = self.http.get(TIMESTAMP)
         r.raise_for_status()
-        data = r.json()
-        if data.get("code") != 0 or not data.get("data", {}).get("access_token"):
-            raise IgpsportError("Login rejected")
-        self.token = data["data"]["access_token"]
+        return r.json()
+
+    def login(self):
+        raise IgpsportError(
+            "Automatic login is unavailable: current iGPSPORT Web requires "
+            "x-signature, x-nonce and x-timestamp. Supply IGPSPORT_TOKEN locally."
+        )
 
     def get(self, path, params=None):
         if not self.token:
             self.login()
-        r = self.http.get(path, params=params, headers={"Authorization": "Bearer " + self.token})
-        if r.status_code in (401, 403) and self.username and self.password:
-            self.login()
-            r = self.http.get(path, params=params, headers={"Authorization": "Bearer " + self.token})
+        r = self.http.get(path, params=params,
+                          headers={"Authorization": "Bearer " + self.token})
+        if r.status_code in (401, 403):
+            raise IgpsportError("Bearer token expired or rejected; update IGPSPORT_TOKEN")
         r.raise_for_status()
         data = r.json()
         if data.get("code") != 0:
@@ -60,12 +63,10 @@ class IgpsportClient:
 
     def download_fit(self, url):
         parsed = urlparse(url)
-        # Do not allow arbitrary URLs from the upstream detail response.
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise IgpsportError("Invalid FIT URL")
-        # Host allowlist is intentionally strict; extend only after inspecting actual fitUrl.
         host = parsed.hostname.lower().rstrip(".")
-        if host not in ("igpsport.com", "prod.zh.igpsport.com") and not host.endswith(".igpsport.com"):
+        if host != "igpsport.com" and not host.endswith(".igpsport.com"):
             raise IgpsportError("FIT host not allowlisted; inspect actual fitUrl before extending")
         with httpx.Client(timeout=60, follow_redirects=False, trust_env=False) as client:
             r = client.get(url)

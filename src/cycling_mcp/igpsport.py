@@ -24,18 +24,22 @@ class IgpsportClient:
         self.username = username
         self.password = password
         path = wasm_path or os.getenv("IGPSPORT_WASM_PATH", "assets/edge_core_wasm_bg-GHC38n8Q.wasm")
-        self.transport = SignedTransport(Path(path))
+        self.wasm_path = Path(path)
+        self.transport = None
         self._authenticated = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
-        self.transport.close()
+        if self.transport is not None:
+            self.transport.close()
 
     def _authenticate(self):
         if self._authenticated:
             return
+        if self.transport is None:
+            self.transport = SignedTransport(self.wasm_path)
         if self.token:
             self.transport.use_token(self.token)
         elif self.username and self.password:
@@ -48,6 +52,8 @@ class IgpsportClient:
         self._authenticate()
 
     def server_timestamp(self):
+        if self.transport is None:
+            self.transport = SignedTransport(self.wasm_path)
         return self.transport._exchange("GET", TIME_PATH)
 
     def get(self, path, params=None):

@@ -3,7 +3,7 @@ name = "cycling-mcp"
 version = "0.1.0"
 description = "Private iGPSPORT CN sync and MCP server"
 requires-python = ">=3.11"
-dependencies = ["httpx>=0.27,<1", "mcp>=1.9,<2", "apscheduler>=3.10,<4", "fitdecode>=0.11,<1", "cryptography>=42,<47"]
+dependencies = ["httpx>=0.27,<1", "mcp>=1.9,<2", "apscheduler>=3.10,<4", "fitdecode>=0.11,<1", "cryptography>=42,<47", "python-dotenv>=1,<2"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]

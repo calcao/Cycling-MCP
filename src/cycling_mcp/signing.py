@@ -132,6 +132,8 @@ def build_get_path(path: str, params: dict | None = None) -> str:
 
 
 class SignedTransport:
+    """直连中国区接口，并隔离时间接口与业务接口的请求头。"""
+
     def __init__(self, wasm_path: Path, *, timezone: str = "Asia/Shanghai",
                  timeout: float = 30):
         self.private_key = load_unwrapping_key(wasm_path)
@@ -141,14 +143,15 @@ class SignedTransport:
         self.clock_offset = 0.0
         self.timezone = timezone
         self.http = httpx.Client(base_url=BASE_URL, timeout=timeout,
-                                 follow_redirects=False,
+                                 follow_redirects=False, trust_env=False,
                                  headers={
                                      "Accept": "application/json, text/plain, */*",
+                                     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                                      "Origin": "https://app.igpsport.cn",
                                      "Referer": "https://app.igpsport.cn/",
-                                     "Qiwu-App-Version": "8.07.08",
-                                     "X-Platform": "web",
-                                     "TimeZone": timezone,
+                                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                                   "Chrome/150.0.0.0 Safari/537.36",
                                  })
 
     def close(self):
@@ -157,6 +160,16 @@ class SignedTransport:
     def _exchange(self, method: str, path: str, body: bytes | None = None,
                   *, signed: bool = False):
         headers = {}
+        if path == TIME_PATH:
+            # 时间接口不接受业务头，且不能携带登录凭据或签名。
+            signed = False
+        else:
+            headers.update({
+                "Accept-Language": "zh-Hans",
+                "Qiwu-App-Version": "8.07.08",
+                "X-Platform": "web",
+                "TimeZone": self.timezone,
+            })
         if body is not None:
             headers["Content-Type"] = "application/json"
         if signed:

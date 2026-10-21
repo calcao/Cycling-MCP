@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from .activity import normalize_zones, public_summary, sanitize_activity_data
 
 class ActivityStore:
     def __init__(self, root: Path):
@@ -35,17 +36,24 @@ class ActivityStore:
             row = db.execute("SELECT fit_file FROM activities WHERE id=?", (ride_id,)).fetchone()
         return bool(row and row["fit_file"] and (self.root / row["fit_file"]).exists())
 
-    def save(self, ride_id, info, relative_fit, digest):
+    def save(self, ride_id, info, relative_fit=None, digest=None):
+        """保存接口数据；资源未重新获取时保留已有数据及可选 FIT。"""
         with self.connection() as db:
-            db.execute("""INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?)
+            previous = db.execute("SELECT record_json FROM activities WHERE id=?", (ride_id,)).fetchone()
+            record = json.loads(previous["record_json"]) if previous else {}
+            record = sanitize_activity_data({**record, **info})
+            db.execute("""INSERT INTO activities
+                (id,title,start_time,distance_m,moving_time_s,fit_file,sha256,record_json,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title,start_time=excluded.start_time,
                 distance_m=excluded.distance_m,moving_time_s=excluded.moving_time_s,
-                fit_file=excluded.fit_file,sha256=excluded.sha256,
+                fit_file=COALESCE(excluded.fit_file,activities.fit_file),
+                sha256=COALESCE(excluded.sha256,activities.sha256),
                 record_json=excluded.record_json,updated_at=excluded.updated_at""",
-                (ride_id, str(info.get("title", "")), str(info.get("startTime", "")),
-                 info.get("rideDistance"), info.get("totalMovingTime"), relative_fit,
-                 digest, json.dumps(info, ensure_ascii=False),
+                (ride_id, str(record.get("title", "")), str(record.get("startTime", "")),
+                 record.get("rideDistance"), record.get("totalMovingTime", record.get("movingTime")), relative_fit,
+                 digest, json.dumps(record, ensure_ascii=False),
                  datetime.now(timezone.utc).isoformat()))
 
     def record_sync(self, status, detail=""):
@@ -64,15 +72,25 @@ class ActivityStore:
             count = db.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
         return {"count": count, "sync": dict(row) if row else None}
 
-    def list_activities(self, limit=20):
+    def list_activities(self, limit=20, offset=0):
+        """按稳定顺序分页查询已同步活动。"""
+        if type(limit) is not int or limit < 1 or type(offset) is not int or offset < 0:
+            raise ValueError("limit must be positive and offset must be non-negative")
         limit = max(1, min(100, limit))
         with self.connection() as db:
             rows = db.execute("""SELECT id,title,start_time,distance_m,moving_time_s
-                FROM activities ORDER BY start_time DESC LIMIT ?""", (limit,)).fetchall()
+                FROM activities ORDER BY start_time DESC,id DESC LIMIT ? OFFSET ?""", (limit, offset)).fetchall()
         return [dict(row) for row in rows]
 
     def get_activity(self, ride_id):
+        """返回详情汇总、计圈、区间及部分失败状态，不返回位置轨迹。"""
         with self.connection() as db:
-            row = db.execute("""SELECT id,title,start_time,distance_m,moving_time_s,fit_file,sha256
+            row = db.execute("""SELECT id,title,start_time,distance_m,moving_time_s,fit_file,sha256,
+                record_json,updated_at
                 FROM activities WHERE id=?""", (ride_id,)).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        result = dict(row)
+        info = sanitize_activity_data(json.loads(result.pop("record_json")))
+        return {**result, "summary": public_summary(info), "laps": info.get("laps"),
+                "zones": normalize_zones(info, info.get("zones")), "sync_errors": info.get("sync_errors", [])}

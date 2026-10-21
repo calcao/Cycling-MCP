@@ -1,0 +1,8 @@
+# 只将镜像构建所需源码发送给 Docker，不发送配置、密钥或个人数据。
+**
+!Dockerfile
+!pyproject.toml
+!src/
+!src/**
+src/**/__pycache__
+src/**/*.pyc

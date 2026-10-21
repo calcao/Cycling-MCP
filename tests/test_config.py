@@ -46,3 +46,17 @@ def test_invalid_optional_fit_setting_is_explicit(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "environ", {"SYNC_DOWNLOAD_FIT": "maybe"})
     with pytest.raises(ValueError, match="SYNC_DOWNLOAD_FIT"):
         Settings.from_env()
+
+
+def test_public_listening_requires_oauth(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "environ", {"MCP_HOST": "0.0.0.0"})
+    with pytest.raises(ValueError, match="requires MCP_PUBLIC_URL"):
+        Settings.from_env()
+
+
+def test_public_origin_requires_complete_owner_configuration(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "environ", {"MCP_PUBLIC_URL": "https://cycling.example.test"})
+    with pytest.raises(ValueError, match="requires OAuth configuration"):
+        Settings.from_env()

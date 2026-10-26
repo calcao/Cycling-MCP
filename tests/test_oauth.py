@@ -163,6 +163,23 @@ def test_csrf_password_and_origin_are_required(oauth):
     assert code
 
 
+def test_login_page_preserves_same_origin_form_submission(oauth):
+    provider, client, _ = oauth
+    values = begin(client, register(client))
+    page = client.get('/login', params={'request': values['request']})
+    assert page.headers['referrer-policy'] == 'same-origin'
+    assert "form-action 'self' https://client.example;" in page.headers['content-security-policy']
+    assert "frame-ancestors 'none'" in page.headers['content-security-policy']
+    values = form(page)
+    assert client.post('/login', headers={'Origin': 'null'},
+                       data={**values, 'decision': 'deny'}).status_code == 400
+    response = client.post('/login', headers={'Origin': provider.base},
+                           data={**values, 'username': 'owner', 'password': PASSWORD, 'decision': 'allow'})
+    assert response.status_code == 303
+    assert 'code=' in response.headers['location']
+    assert response.headers['referrer-policy'] == 'no-referrer'
+
+
 def test_deny_does_not_issue_code(oauth):
     _, client, _ = oauth
     response = client.post("/login", data={**begin(client, register(client)), "decision": "deny"})

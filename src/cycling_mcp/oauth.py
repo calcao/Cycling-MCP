@@ -6,7 +6,7 @@ import html
 import ipaddress
 import secrets
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from mcp.server.auth.provider import (
     AccessToken, AuthorizationCode, AuthorizationParams, AuthorizeError,
@@ -190,6 +190,8 @@ class OAuthProvider:
             self.store.put(db, "pending", identifier, current, current["expires_at"])
         name = html.escape((client.get("client_name") or "MCP 客户端")[:200])
         redirect = html.escape(pending["params"]["redirect_uri"])
+        callback = urlsplit(pending["params"]["redirect_uri"])
+        callback_origin = callback.scheme + "://" + quote(callback.netloc, safe="[]:.-")
         message = '<p role="alert">登录失败，请检查授权账户与密码。</p>' if error else ""
         response = HTMLResponse(f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>授权 Cycling MCP</title>
@@ -207,8 +209,11 @@ button[value=deny]{{background:#edf1ee;color:#182927}}[role=alert]{{color:#a0202
 <button name="decision" value="allow">登录并允许访问</button>
 <button name="decision" value="deny" formnovalidate>取消</button></form></main></html>''',
                                 status_code=401 if error else 200, headers={
-            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+            # Keep the Origin on same-origin form POSTs for the CSRF check below.
+            # no-referrer makes browsers send Origin: null for this navigation.
+            "Cache-Control": "no-store", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+                f"form-action 'self' {callback_origin}; frame-ancestors 'none'",
         })
         response.set_cookie(COOKIE, csrf, secure=True, httponly=True, samesite="lax", max_age=600, path="/")
         return response

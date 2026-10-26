@@ -3,7 +3,7 @@ from pathlib import Path
 import fitdecode
 
 def summarize_fit(path: Path) -> dict:
-    """Aggregate sensor data without returning GPS traces."""
+    """汇总可选 FIT 的传感器数据，允许缺少部分传感器，不返回轨迹。"""
     counts, totals = Counter(), Counter()
     maximum = {}
     with fitdecode.FitReader(path, check_crc=fitdecode.CrcCheck.WARN) as frames:
@@ -11,7 +11,7 @@ def summarize_fit(path: Path) -> dict:
             if not isinstance(frame, fitdecode.FitDataMessage) or frame.name != "record":
                 continue
             for name in ("heart_rate", "power", "cadence", "speed"):
-                value = frame.get_value(name)
+                value = frame.get_value(name, fallback=None)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     counts[name] += 1
                     totals[name] += value

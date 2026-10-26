@@ -1,4 +1,14 @@
-# Deny all public MCP access until compatible authorization is configured.
+# TLS 由 Caddy 自动管理，所有 MCP 请求由后端验证 OAuth。
 {$MCP_DOMAIN} {
-    respond "MCP endpoint not enabled: configure authentication first" 403
+    request_body {
+        max_size 1MB
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        -Server
+    }
+    reverse_proxy cycling-server:8000 {
+        flush_interval -1
+    }
 }

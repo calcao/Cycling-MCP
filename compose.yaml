@@ -1,5 +1,6 @@
 services:
   cycling-server:
+    image: cycling-mcp:local
     build: .
     restart: unless-stopped
     init: true
@@ -7,15 +8,37 @@ services:
       IGPSPORT_TOKEN: ${IGPSPORT_TOKEN:-}
       IGPSPORT_USERNAME: ${IGPSPORT_USERNAME:-}
       IGPSPORT_PASSWORD: ${IGPSPORT_PASSWORD:-}
+      IGPSPORT_WASM_PATH: /run/igpsport.wasm
       CYCLING_DATA_DIR: /data
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
+      MCP_DOMAIN: ${MCP_DOMAIN:?Run bash deploy.sh first}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:?Run bash deploy.sh first}
+      MCP_ADMIN_USERNAME: ${MCP_ADMIN_USERNAME:?Run bash deploy.sh first}
+      MCP_ADMIN_PASSWORD_HASH: ${MCP_ADMIN_PASSWORD_HASH:?Run bash deploy.sh first}
+      MCP_OAUTH_STORAGE_KEY: ${MCP_OAUTH_STORAGE_KEY:?Run bash deploy.sh first}
       SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-60}
       SYNC_PAGES: ${SYNC_PAGES:-0}
+      SYNC_DOWNLOAD_FIT: ${SYNC_DOWNLOAD_FIT:-false}
     volumes:
       - ./data:/data
+      - type: bind
+        source: ${IGPSPORT_WASM_PATH:-./assets/edge_core_wasm_bg-GHC38n8Q.wasm}
+        target: /run/igpsport.wasm
+        read_only: true
+        bind:
+          create_host_path: false
     expose:
       - "8000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client; c=http.client.HTTPConnection('127.0.0.1',8000,timeout=3); c.request('GET','/healthz'); assert c.getresponse().status == 200"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
     networks: [private]
   caddy:
     image: caddy:2
@@ -27,7 +50,9 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [cycling-server]
+    depends_on:
+      cycling-server:
+        condition: service_healthy
     networks: [private]
 networks:
   private:

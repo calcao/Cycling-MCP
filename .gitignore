@@ -224,3 +224,4 @@ assets/*.wasm
 data/
 *.fit
 activities-page*.json
+.deploy.lock
